@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Number Tracker (00000 - 99999)</title>
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+/* Custom styles for mobile responsiveness and aesthetics */
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #f7f9fb;
+}
+.container {
+    /* Max width for desktop viewing */
+    max-width: 95%; 
+    margin: 0 auto;
+}
+@media (min-width: 768px) {
+    .container {
+        /* Constrain width on larger screens */
+        max-width: 600px;
+    }
+}
+.card {
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    transition: transform 0.2s;
+}
+.number-input {
+    /* Large, clear text for mobile input */
+    font-size: 2.5rem;
+    letter-spacing: 0.5rem;
+    text-align: center;
+    height: 5.5rem; /* Taller input for easier tapping */
+}
+.status-box {
+    min-height: 8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    padding: 1.5rem; /* More padding for better spacing */
+    margin-top: 1.5rem;
+}
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="app" class="container">
+        <header class="text-center mb-10">
+            <h1 class="text-3xl md:text-4xl font-extrabold text-blue-800">Numbers Tracker</h1>
+            <p class="text-gray-500 mt-2">Manage numbers 00000 to 99999 with real-time locking.</p>
+        </header>
+
+        <!-- Main Input Card -->
+        <div id="main-card" class="card bg-white p-6 rounded-xl transition-all">
+            <div id="loading-indicator" class="text-center p-4 text-xl text-blue-600 hidden">
+                <svg class="animate-spin h-5 w-5 mr-3 inline-block" viewBox="0 0 24 24">...</svg>
+                Initializing Database...
+            </div>
+
+            <!-- Seller Info - NOW A DROPDOWN -->
+            <div id="auth-info" class="mb-6">
+                <!-- User ID will say 'ID: Offline' until config is added -->
+                <p id="user-display" class="text-sm font-medium text-gray-600 truncate mb-2">User ID: Loading...</p>
+                <label for="seller-name" class="block text-sm font-bold text-gray-700 mb-2">Select Your Name</label>
+                
+                <!-- DROPDOWN MENU REPLACES INPUT FIELD -->
+                <select id="seller-name" 
+                        class="w-full p-3 border-2 border-indigo-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 bg-white">
+                    <option value="" disabled selected>--- Select a  ---</option>
+                    <!-- Options populated by JavaScript -->
+                </select>
+            </div>
+
+            <!-- Number Input -->
+            <label for="lottery-number" class="block text-lg font-bold text-gray-700 mb-4">Number to Check/Claim (00000 - 99999)</label>
+            <input type="number" id="lottery-number" min="0" max="99999" placeholder="e.g., 01234" 
+                   class="number-input w-full p-4 md:p-6 border-4 border-indigo-500 rounded-xl focus:border-indigo-700 focus:ring-4 focus:ring-indigo-200 transition duration-150">
+            
+            <button id="claim-button" onclick="checkAndClaimNumber()" 
+                    class="mt-6 w-full py-4 text-white font-bold text-xl bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-lg transition duration-150 transform hover:scale-[1.01] focus:outline-none focus:ring-4 focus:ring-indigo-300"
+                    disabled>
+                Check & Claim Number
+            </button>
+        </div>
+
+        <!-- Status Area -->
+        <div id="status-display" class="status-box bg-white shadow-xl mt-6">
+            <p class="text-gray-500 text-center text-lg">Enter a number and select your name above to begin.</p>
+        </div>
+        
+    </div>
+
+    <!-- The Confirmation Modal -->
+    <div id="confirmation-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 transition-opacity duration-300">
+        <div class="bg-white rounded-xl p-8 max-w-sm w-full shadow-2xl transform scale-100 transition-transform duration-300">
+            <h3 class="text-2xl font-bold text-gray-900 mb-4" id="modal-title">Confirm Sale</h3>
+            <p class="text-gray-700 mb-6" id="modal-message"></p>
+            <div class="flex justify-end space-x-3">
+                <button onclick="closeModal()" class="py-2 px-4 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition">Cancel</button>
+                <button onclick="confirmClaim()" id="confirm-claim-button" class="py-2 px-4 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition">Confirm Claim</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs, runTransaction, connectFirestoreEmulator, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+  
+        //
+        const LOCAL_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDz5I7Ltlfx1NQSnNLOTQA0pTttNyoCQEk",
+  authDomain: "number-tracking-15058.firebaseapp.com",
+  projectId: "number-tracking-15058",
+  storageBucket: "number-tracking-15058.firebasestorage.app",
+  messagingSenderId: "983864645564",
+  appId: "1:983864645564:web:3014f25fd82c9a338e7db9",
+  measurementId: "G-JKJDV322N0"
+}; 
+        
+        // This logic ensures it uses the local config if the global one is missing.
+        const firebaseConfig = Object.keys(LOCAL_FIREBASE_CONFIG).length > 0
+            ? LOCAL_FIREBASE_CONFIG
+            : JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        
+        // ====================================================================================
+        
+        // --- 1. SELLER NAMES LIST ---
+        // This is the definitive list of 12 seller names used in the dropdown menu.
+        const SELLER_NAMES = [
+            "Alice", "Bob", "Charle", "Darwin", 
+            "Edwin", "Floke", "Gorge", "Harry", 
+            "Ivy", "Jack", "Kevin", "Luna"
+        ];
+        // --------------------------
+
+        // Firebase Instances
+        let app;
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        // UI elements
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const userDisplay = document.getElementById('user-display');
+        const claimButton = document.getElementById('claim-button');
+        const statusDisplay = document.getElementById('status-display');
+        const sellerNameDropdown = document.getElementById('seller-name'); // Updated variable name
+
+        // --- Core Initialization ---
+        async function initializeFirebase() {
+            // Check if firebaseConfig is valid before attempting connection
+            if (!firebaseConfig || !firebaseConfig.projectId) {
+                // If config is missing, we still initialize the UI, but disable the buttons.
+                userDisplay.textContent = 'ID: OFFLINE (Config Missing)';
+                claimButton.disabled = true;
+                loadingIndicator.classList.add('hidden');
+                updateStatus('Database Configuration Missing. Sales Tracking is currently DISABLED. Please insert Firebase Config to enable.', 'bg-red-100 text-red-800');
+                return; // Stop initialization
+            }
+            
+            loadingIndicator.classList.remove('hidden');
+            
+            try {
+                // setLogLevel('debug'); // Uncomment for detailed debug logs
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // 1. Handle Authentication
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        userDisplay.textContent = 'Seller ID: ' + userId;
+                        claimButton.disabled = false;
+                        loadingIndicator.classList.add('hidden');
+                        isAuthReady = true;
+                    } else {
+                        // Sign in using the provided token or anonymously
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase Initialization Error:", error);
+                const message = `Initialization Failed: Database connection error. Check your Firebase Config.`;
+                updateStatus(`<p class="text-red-600 font-bold text-center">${message}</p>`, 'bg-red-100');
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+        
+        /**
+         * Populates the seller name dropdown using the SELLER_NAMES array.
+         * This function runs FIRST, regardless of Firebase status.
+         */
+        function populateSellerDropdown() {
+            SELLER_NAMES.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                sellerNameDropdown.appendChild(option);
+            });
+        }
+
+
+        // --- Utility Functions (rest of the code remains the same) ---
+
+        // Formats a number to ensure it has five digits (e.g., 123 -> "00123")
+        function formatNumber(num) {
+            if (num === null || num === undefined || num === '') return null;
+            const parsedNum = parseInt(num, 10);
+            if (isNaN(parsedNum) || parsedNum < 0 || parsedNum > 99999) {
+                return null;
+            }
+            return String(parsedNum).padStart(5, '0');
+        }
+
+        // --- Transactional Logic ---
+
+        // Global variable to hold the number we are trying to claim during the confirmation flow
+        let pendingNumber = null;
+        let pendingSellerName = null;
+
+        window.checkAndClaimNumber = async function() {
+            if (!isAuthReady) {
+                updateStatus('Cannot track sales: Database connection failed. Please ensure Firebase Config is correct.', 'bg-red-100 text-red-800');
+                return;
+            }
+            // ... rest of the claim logic (uses Firestore) ...
+            
+            const numberInput = document.getElementById('lottery-number');
+            const rawNumber = numberInput.value;
+            const sellerName = sellerNameDropdown.value; 
+            const formattedNumber = formatNumber(rawNumber);
+
+            if (!sellerName) {
+                updateStatus('Please select your Seller Name from the list before checking a number.', 'bg-red-100 text-red-800');
+                sellerNameDropdown.focus();
+                return;
+            }
+
+            if (!formattedNumber) {
+                updateStatus('Invalid number. Please enter a number between 0 and 99999.', 'bg-red-100 text-red-800');
+                numberInput.focus();
+                return;
+            }
+
+            updateStatus('Checking number availability...', 'bg-blue-100 text-blue-800');
+            claimButton.disabled = true;
+
+            const salesCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'lottery_sales');
+            const q = query(salesCollectionRef, where('number', '==', formattedNumber));
+
+            try {
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
+                    pendingNumber = formattedNumber;
+                    pendingSellerName = sellerName;
+                    showModal(`Are you sure you want to claim number ${formattedNumber} for ${sellerName}?`, 'Confirm Sale');
+                    updateStatus(`Number ${formattedNumber} is AVAILABLE. Confirm the claim below.`, 'bg-green-100 text-green-800');
+                } else {
+                    const saleData = querySnapshot.docs[0].data();
+                    const soldTime = new Date(saleData.timestamp).toLocaleString();
+
+                    updateStatus(`
+                        <p class="font-bold text-2xl text-red-700">SOLD</p>
+                        <p class="text-lg">Number ${formattedNumber} was claimed by:</p>
+                        <p class="font-semibold text-gray-900">${saleData.sellerName} (ID: ${saleData.sellerId.substring(0, 8)}...)</p>
+                        <p class="text-sm text-gray-500 mt-2">On: ${soldTime}</p>
+                    `, 'bg-red-100');
+                }
+            } catch (e) {
+                console.error("Error checking number:", e);
+                updateStatus('A database error occurred. Check the console for details.', 'bg-red-100 text-red-800');
+            } finally {
+                claimButton.disabled = false;
+            }
+        }
+        
+        window.confirmClaim = async function() {
+            closeModal();
+            updateStatus('Finalizing claim...', 'bg-yellow-100 text-yellow-800');
+            claimButton.disabled = true;
+
+            const finalNumber = pendingNumber;
+            const finalSellerName = pendingSellerName;
+            
+            try {
+                const salesCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'lottery_sales');
+                const numberDocRef = doc(salesCollectionRef); 
+
+                const result = await runTransaction(db, async (transaction) => {
+                    const q = query(salesCollectionRef, where('number', '==', finalNumber));
+                    const snapshot = await getDocs(q);
+
+                    if (!snapshot.empty) {
+                        throw new Error("Concurrency Conflict: This number was just claimed by another seller.");
+                    }
+
+                    const newSaleData = {
+                        number: finalNumber,
+                        sellerId: userId,
+                        sellerName: finalSellerName,
+                        timestamp: Date.now()
+                    };
+                    transaction.set(numberDocRef, newSaleData);
+                    return newSaleData;
+                });
+
+                updateStatus(`
+                    <p class="font-bold text-2xl text-green-700">CLAIM SUCCESSFUL!</p>
+                    <p class="text-lg">Number ${finalNumber} is now SOLD.</p>
+                    <p class="text-base text-gray-600">Recorded by ${finalSellerName}</p>
+                `, 'bg-green-100');
+                
+            } catch (e) {
+                console.error("Transaction Error:", e);
+                const errorMessage = e.message.includes("Concurrency Conflict") 
+                    ? `Claim failed: ${e.message}`
+                    : 'A critical database error occurred during the claim process.';
+                    
+                updateStatus(`<p class="font-bold text-red-700">${errorMessage}</p>`, 'bg-red-100 text-red-800');
+            } finally {
+                claimButton.disabled = false;
+                pendingNumber = null;
+                pendingSellerName = null;
+            }
+        }
+
+
+        // --- UI Helper Functions ---
+
+        function updateStatus(htmlContent, className = 'bg-white text-gray-500') {
+            statusDisplay.className = `status-box shadow-xl mt-6 ${className} rounded-xl`;
+            statusDisplay.innerHTML = htmlContent;
+        }
+        
+        function showModal(message, title) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('confirmation-modal').classList.remove('hidden');
+            document.getElementById('confirmation-modal').classList.add('flex');
+        }
+
+        window.closeModal = function() {
+            document.getElementById('confirmation-modal').classList.add('hidden');
+            document.getElementById('confirmation-modal').classList.remove('flex');
+        }
+
+        // --- GLOBAL STARTUP ---
+        populateSellerDropdown(); // Run this first to ensure names are visible!
+        initializeFirebase();
+    </script>
+</body>
+</html>
